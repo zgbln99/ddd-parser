@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DDD Parser - Generator Workshiftów</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --success-color: #27ae60;
+            --warning-color: #f39c12;
+            --danger-color: #e74c3c;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .main-container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            margin: 50px auto;
+            max-width: 1200px;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 300;
+        }
+
+        .header p {
+            margin: 10px 0 0;
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .upload-zone {
+            border: 3px dashed #ddd;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+            background: #f8f9fa;
+            cursor: pointer;
+        }
+
+        .upload-zone:hover {
+            border-color: var(--secondary-color);
+            background: #e3f2fd;
+        }
+
+        .upload-zone.dragover {
+            border-color: var(--success-color);
+            background: #e8f5e8;
+        }
+
+        .upload-icon {
+            font-size: 4rem;
+            color: #aaa;
+            margin-bottom: 20px;
+        }
+
+        .date-filters {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 25px;
+            margin: 30px 0;
+        }
+
+        .progress-section {
+            margin: 30px 0;
+            display: none;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .progress {
+            height: 25px;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            transition: width 0.3s ease;
+            font-weight: 600;
+        }
+
+        .file-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            background: white;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-icon {
+            color: var(--secondary-color);
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--secondary-color) 0%, #2980b9 100%);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(52, 152, 219, 0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, var(--success-color) 0%, #219a52 100%);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 600;
+        }
+
+        .alert {
+            border-radius: 10px;
+            border: none;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .stats-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            margin-bottom: 20px;
+        }
+
+        .stats-value {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--secondary-color);
+            margin-bottom: 5px;
+        }
+
+        .stats-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .results-section {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .error-list {
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 768px) {
+            .main-container {
+                margin: 20px;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="main-container">
+            <div class="header">
+                <h1><i class="fas fa-tachometer-alt"></i> DDD Parser</h1>
+                <p>Generator workshiftów z plików tachografów cyfrowych</p>
+            </div>
+
+            <div class="content">
+                <!-- Upload Section -->
+                <div class="upload-section">
+                    <div class="upload-zone" id="uploadZone">
+                        <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                        <h4>Przeciągnij pliki .DDD tutaj lub kliknij aby wybrać</h4>
+                        <p class="text-muted">Obsługiwane formaty: .DDD (pliki tachografów)</p>
+                        <input type="file" id="fileInput" multiple accept=".DDD,.ddd" style="display: none;">
+                    </div>
+
+                    <div class="file-list" id="fileList" style="display: none;">
+                        <h6><i class="fas fa-list"></i> Wybrane pliki:</h6>
+                        <div id="selectedFiles"></div>
+                    </div>
+                </div>
+
+                <!-- Date Filters -->
+                <div class="date-filters">
+                    <h5><i class="fas fa-calendar-alt"></i> Filtrowanie według daty (opcjonalne)</h5>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="startDate" class="form-label">Data początkowa:</label>
+                            <input type="date" class="form-control" id="startDate">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="endDate" class="form-label">Data końcowa:</label>
+                            <input type="date" class="form-control" id="endDate">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="text-center">
+                    <button class="btn btn-primary btn-lg" id="startProcessing" disabled>
+                        <i class="fas fa-play"></i> Rozpocznij przetwarzanie
+                    </button>
+                    <button class="btn btn-secondary btn-lg ms-3" id="clearFiles">
+                        <i class="fas fa-trash"></i> Wyczyść
+                    </button>
+                </div>
+
+                <!-- Progress Section -->
+                <div class="progress-section" id="progressSection">
+                    <h5><i class="fas fa-cogs"></i> Postęp przetwarzania</h5>
+
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="stats-card">
+                                <div class="stats-value" id="totalFiles">0</div>
+                                <div class="stats-label">Pliki łącznie</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stats-card">
+                                <div class="stats-value" id="processedFiles">0</div>
+                                <div class="stats-label">Przetworzone</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stats-card">
+                                <div class="stats-value" id="remainingFiles">0</div>
+                                <div class="stats-label">Pozostałe</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stats-card">
+                                <div class="stats-value" id="estimatedTime">--</div>
+                                <div class="stats-label">Czas do końca</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="progress-info">
+                        <span id="currentFile">Przygotowanie...</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-success" id="progressBar" style="width: 0%">0%</div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="results-section" id="resultsSection">
+                    <div class="alert alert-success">
+                        <h5><i class="fas fa-check-circle"></i> Przetwarzanie zakończone!</h5>
+                        <p>Workshifty zostały wygenerowane pomyślnie.</p>
+                        <button class="btn btn-success" id="downloadBtn">
+                            <i class="fas fa-download"></i> Pobierz raport Excel
+                        </button>
+                    </div>
+
+                    <div id="errorSection" style="display: none;">
+                        <div class="alert alert-warning">
+                            <h6><i class="fas fa-exclamation-triangle"></i> Błędy podczas przetwarzania:</h6>
+                            <div class="error-list" id="errorList"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Info Section -->
+                <div class="mt-5">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="alert alert-info">
+                                <h6><i class="fas fa-info-circle"></i> Informacje</h6>
+                                <ul class="mb-0">
+                                    <li>Obsługiwane pliki: .DDD (tachografy cyfrowe)</li>
+                                    <li>Maksymalny rozmiar: 500MB</li>
+                                    <li>Format wyjścia: Excel (.xlsx)</li>
+                                    <li>Automatyczne grupowanie według kierowców</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="alert alert-secondary">
+                                <h6><i class="fas fa-chart-line"></i> Generowane dane</h6>
+                                <ul class="mb-0">
+                                    <li>Czasy jazdy i odpoczynku</li>
+                                    <li>Prędkości i dystanse</li>
+                                    <li>Podsumowania dzienne</li>
+                                    <li>Zgodność z regulacjami UE</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        class DDDParserApp {
+            constructor() {
+                this.selectedFiles = [];
+                this.isProcessing = false;
+                this.initializeElements();
+                this.bindEvents();
+            }
+
+            initializeElements() {
+                this.uploadZone = document.getElementById('uploadZone');
+                this.fileInput = document.getElementById('fileInput');
+                this.fileList = document.getElementById('fileList');
+                this.selectedFilesDiv = document.getElementById('selectedFiles');
+                this.startBtn = document.getElementById('startProcessing');
+                this.clearBtn = document.getElementById('clearFiles');
+                this.progressSection = document.getElementById('progressSection');
+                this.resultsSection = document.getElementById('resultsSection');
+                this.progressBar = document.getElementById('progressBar');
+                this.progressPercent = document.getElementById('progressPercent');
+                this.currentFile = document.getElementById('currentFile');
+                this.downloadBtn = document.getElementById('downloadBtn');
+            }
+
+            bindEvents() {
+                // Upload zone events
+                this.uploadZone.addEventListener('click', () => this.fileInput.click());
+                this.uploadZone.addEventListener('dragover', (e) => this.handleDragOver(e));
+                this.uploadZone.addEventListener('dragleave', (e) => this.handleDragLeave(e));
+                this.uploadZone.addEventListener('drop', (e) => this.handleDrop(e));
+
+                // File input
+                this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+
+                // Buttons
+                this.startBtn.addEventListener('click', () => this.startProcessing());
+                this.clearBtn.addEventListener('click', () => this.clearFiles());
+                this.downloadBtn.addEventListener('click', () => this.downloadResults());
+            }
+
+            handleDragOver(e) {
+                e.preventDefault();
+                this.uploadZone.classList.add('dragover');
+            }
+
+            handleDragLeave(e) {
+                this.uploadZone.classList.remove('dragover');
+            }
+
+            handleDrop(e) {
+                e.preventDefault();
+                this.uploadZone.classList.remove('dragover');
+                const files = Array.from(e.dataTransfer.files);
+                this.addFiles(files);
+            }
+
+            handleFileSelect(e) {
+                const files = Array.from(e.target.files);
+                this.addFiles(files);
+            }
+
+            addFiles(files) {
+                const dddFiles = files.filter(file =>
+                    file.name.toLowerCase().endsWith('.ddd')
+                );
+
+                this.selectedFiles = [...this.selectedFiles, ...dddFiles];
+                this.updateFileList();
+                this.updateStartButton();
+
+                if (dddFiles.length !== files.length) {
+                    this.showAlert('Niektóre pliki zostały pominięte. Obsługiwane są tylko pliki .DDD', 'warning');
+                }
+            }
+
+            updateFileList() {
+                if (this.selectedFiles.length === 0) {
+                    this.fileList.style.display = 'none';
+                    return;
+                }
+
+                this.fileList.style.display = 'block';
+                this.selectedFilesDiv.innerHTML = this.selectedFiles.map((file, index) => `
+                    <div class="file-item">
+                        <i class="fas fa-file-alt file-icon"></i>
+                        <span class="flex-grow-1">${file.name}</span>
+                        <small class="text-muted">${this.formatFileSize(file.size)}</small>
+                        <button class="btn btn-sm btn-outline-danger ms-2" onclick="app.removeFile(${index})">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                `).join('');
+            }
+
+            removeFile(index) {
+                this.selectedFiles.splice(index, 1);
+                this.updateFileList();
+                this.updateStartButton();
+            }
+
+            clearFiles() {
+                this.selectedFiles = [];
+                this.fileInput.value = '';
+                this.updateFileList();
+                this.updateStartButton();
+                this.hideResults();
+            }
+
+            updateStartButton() {
+                this.startBtn.disabled = this.selectedFiles.length === 0 || this.isProcessing;
+            }
+
+            async startProcessing() {
+                if (this.selectedFiles.length === 0) return;
+
+                this.isProcessing = true;
+                this.updateStartButton();
+                this.showProgress();
+                this.hideResults();
+
+                const formData = new FormData();
+                this.selectedFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+
+                const startDate = document.getElementById('startDate').value;
+                const endDate = document.getElementById('endDate').value;
+
+                if (startDate) formData.append('start_date', startDate);
+                if (endDate) formData.append('end_date', endDate);
+
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(result.error || 'Błąd serwera');
+                    }
+
+                    this.showAlert(result.message, 'success');
+                    this.startStatusPolling();
+
+                } catch (error) {
+                    this.showAlert(`Błąd: ${error.message}`, 'danger');
+                    this.isProcessing = false;
+                    this.updateStartButton();
+                    this.hideProgress();
+                }
+            }
+
+            startStatusPolling() {
+                const pollInterval = setInterval(async () => {
+                    try {
+                        const response = await fetch('/status');
+                        const status = await response.json();
+
+                        this.updateProgress(status);
+
+                        if (!status.active) {
+                            clearInterval(pollInterval);
+                            this.isProcessing = false;
+                            this.updateStartButton();
+                            this.showResults(status);
+                        }
+                    } catch (error) {
+                        console.error('Błąd pobierania statusu:', error);
+                    }
+                }, 1000);
+            }
+
+            updateProgress(status) {
+                const percent = status.total_files > 0
+                    ? Math.round((status.processed_files / status.total_files) * 100)
+                    : 0;
+
+                this.progressBar.style.width = `${percent}%`;
+                this.progressBar.textContent = `${percent}%`;
+                this.progressPercent.textContent = `${percent}%`;
+
+                document.getElementById('totalFiles').textContent = status.total_files;
+                document.getElementById('processedFiles').textContent = status.processed_files;
+                document.getElementById('remainingFiles').textContent = status.total_files - status.processed_files;
+
+                if (status.current_file) {
+                    this.currentFile.textContent = `Przetwarzanie: ${status.current_file}`;
+                }
+
+                if (status.estimated_time_remaining) {
+                    const minutes = Math.ceil(status.estimated_time_remaining / 60);
+                    document.getElementById('estimatedTime').textContent = `${minutes}m`;
+                } else {
+                    document.getElementById('estimatedTime').textContent = '--';
+                }
+            }
+
+            showProgress() {
+                this.progressSection.style.display = 'block';
+                this.progressBar.style.width = '0%';
+                this.progressBar.textContent = '0%';
+                this.progressPercent.textContent = '0%';
+                this.currentFile.textContent = 'Przygotowanie...';
+            }
+
+            hideProgress() {
+                this.progressSection.style.display = 'none';
+            }
+
+            showResults(status) {
+                this.resultsSection.style.display = 'block';
+
+                if (status.output_file) {
+                    this.downloadBtn.onclick = () => {
+                        window.location.href = `/download/${status.output_file}`;
+                    };
+                }
+
+                if (status.errors && status.errors.length > 0) {
+                    document.getElementById('errorSection').style.display = 'block';
+                    document.getElementById('errorList').innerHTML = status.errors
+                        .map(error => `<div class="mb-1">${error}</div>`)
+                        .join('');
+                } else {
+                    document.getElementById('errorSection').style.display = 'none';
+                }
+            }
+
+            hideResults() {
+                this.resultsSection.style.display = 'none';
+            }
+
+            downloadResults() {
+                // This will be handled by the button's onclick
+            }
+
+            formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            showAlert(message, type) {
+                // Create and show bootstrap alert
+                const alertDiv = document.createElement('div');
+                alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+                alertDiv.innerHTML = `
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+
+                document.querySelector('.content').insertBefore(alertDiv, document.querySelector('.upload-section'));
+
+                // Auto remove after 5 seconds
+                setTimeout(() => {
+                    if (alertDiv.parentNode) {
+                        alertDiv.remove();
+                    }
+                }, 5000);
+            }
+        }
+
+        // Initialize app
+        const app = new DDDParserApp();
+    </script>
+</body>
+</html>
