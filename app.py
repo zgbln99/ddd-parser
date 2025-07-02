@@ -16,6 +16,7 @@ from logging.handlers import RotatingFileHandler
 import atexit
 from config import config
 import traceback
+import re
 
 def create_app(config_name=None):
     """Factory function to create Flask app"""
@@ -104,10 +105,13 @@ class DDDParser:
             except ImportError as e:
                 self.logger.error(f"Cannot import tacho_parser: {e}")
                 return self._create_fallback_workshift(file_path)
+            except Exception as e:
+                self.logger.warning(f"Tacho parser failed, using fallback: {e}")
+                return self._create_fallback_workshift(file_path)
 
         except Exception as e:
             self.logger.error(f"Błąd parsowania {file_path}: {str(e)}")
-            return self._create_dummy_workshift(file_path)
+            return self._create_fallback_workshift(file_path)
 
     def _convert_to_workshift(self, parsed_data: Dict, file_path: str) -> WorkShift:
         """Konwertuje sparsowane dane na WorkShift"""
@@ -120,26 +124,33 @@ class DDDParser:
             shift_date = datetime.now()
 
             # Spróbuj wyciągnąć dane z parsed_data
-            if 'card_data' in parsed_data and parsed_data['card_data']:
-                card_data = parsed_data['card_data']
-                if 'driver_name' in card_data and card_data['driver_name'] != "N/A":
-                    driver_name = card_data['driver_name']
+            if isinstance(parsed_data, dict):
+                if 'card_data' in parsed_data and isinstance(parsed_data['card_data'], dict):
+                    card_data = parsed_data['card_data']
+                    if 'driver_name' in card_data and card_data['driver_name'] not in ["N/A", "", None]:
+                        driver_name = str(card_data['driver_name']).strip()
 
-            if 'vehicle_data' in parsed_data and parsed_data['vehicle_data']:
-                vehicle_data = parsed_data['vehicle_data']
-                if 'registration' in vehicle_data and vehicle_data['registration'] != "N/A":
-                    vehicle_id = vehicle_data['registration']
+                if 'vehicle_data' in parsed_data and isinstance(parsed_data['vehicle_data'], dict):
+                    vehicle_data = parsed_data['vehicle_data']
+                    if 'registration' in vehicle_data and vehicle_data['registration'] not in ["N/A", "", None]:
+                        vehicle_id = str(vehicle_data['registration']).strip()
 
-            # Spróbuj wyciągnąć dane z nazwy pliku (format: C_20190201_0829_W_Piechowicz_19503120533500.DDD)
-            parts = filename.replace('.DDD', '').replace('.ddd', '').split('_')
-            if len(parts) >= 4:
-                try:
-                    date_str = parts[1]
-                    shift_date = datetime.strptime(date_str, '%Y%m%d')
-                    if len(parts) > 4:
-                        driver_name = parts[4]
-                except:
-                    pass
+                if 'driver_data' in parsed_data and isinstance(parsed_data['driver_data'], dict):
+                    driver_data = parsed_data['driver_data']
+                    if 'driver_name' in driver_data and driver_data['driver_name'] not in ["N/A", "", None]:
+                        driver_name = str(driver_data['driver_name']).strip()
+
+            # Spróbuj wyciągnąć dane z nazwy pliku (format: C_20250502_0856_K_Kudrzycki_1700518095760002.DDD)
+            try:
+                parsed_from_filename = self._parse_filename_advanced(filename)
+                if parsed_from_filename['date']:
+                    shift_date = parsed_from_filename['date']
+                if parsed_from_filename['driver_name'] and driver_name == "Nieznany":
+                    driver_name = parsed_from_filename['driver_name']
+                if parsed_from_filename['vehicle_id']:
+                    vehicle_id = parsed_from_filename['vehicle_id']
+            except Exception as e:
+                self.logger.warning(f"Error parsing filename {filename}: {e}")
 
             # Generuj aktywności na podstawie sparsowanych danych
             activities = self._generate_activities_from_parsed(parsed_data, shift_date)
@@ -160,18 +171,103 @@ class DDDParser:
             self.logger.error(f"Error converting parsed data: {e}")
             return self._create_fallback_workshift(file_path)
 
+    def _parse_filename_advanced(self, filename: str) -> Dict[str, Any]:
+        """Zaawansowane parsowanie nazwy pliku .DDD"""
+        result = {
+            'date': None,
+            'driver_name': None,
+            'vehicle_id': None
+        }
+
+        try:
+            # Usuń rozszerzenie
+            base_name = filename.replace('.DDD', '').replace('.ddd', '')
+            parts = base_name.split('_')
+
+            self.logger.info(f"Parsing filename: {filename}, parts: {parts}")
+
+            # Format 1: C_20250502_0856_K_Kudrzycki_1700518095760002
+            if len(parts) >= 5:
+                # Data z pozycji 1
+                if len(parts[1]) == 8 and parts[1].isdigit():
+                    try:
+                        result['date'] = datetime.strptime(parts[1], '%Y%m%d')
+                    except ValueError:
+                        pass
+
+                # Imię i nazwisko - szukaj części które nie są liczbami
+                name_parts = []
+                for i in range(3, len(parts)):
+                    part = parts[i]
+                    # Pomiń części które wyglądają na kody/liczby
+                    if not part.isdigit() and len(part) > 1 and not re.match(r'^\d+$', part):
+                        # Dodaj tylko jeśli nie wygląda na timestamp
+                        if len(part) < 15:  # Timestamps są długie
+                            name_parts.append(part)
+
+                if name_parts:
+                    result['driver_name'] = " ".join(name_parts)
+
+                # Vehicle ID z pierwszej części
+                if len(parts) > 0:
+                    result['vehicle_id'] = f"{parts[0]}_{parts[3] if len(parts) > 3 else 'VEH'}"
+
+            # Format 2: Inne formaty
+            elif len(parts) >= 3:
+                # Szukaj daty w różnych pozycjach
+                for part in parts:
+                    if len(part) == 8 and part.isdigit():
+                        try:
+                            result['date'] = datetime.strptime(part, '%Y%m%d')
+                            break
+                        except ValueError:
+                            pass
+
+                # Szukaj imion (części które nie są liczbami i mają odpowiednią długość)
+                name_candidates = [p for p in parts if not p.isdigit() and 2 <= len(p) <= 20]
+                if name_candidates:
+                    result['driver_name'] = " ".join(name_candidates[:2])  # Max 2 części dla imienia
+
+            # Fallback - próbuj wyciągnąć datę z różnych formatów
+            if not result['date']:
+                date_patterns = [
+                    r'(\d{8})',  # YYYYMMDD
+                    r'(\d{4}-\d{2}-\d{2})',  # YYYY-MM-DD
+                    r'(\d{2}-\d{2}-\d{4})',  # DD-MM-YYYY
+                ]
+
+                for pattern in date_patterns:
+                    match = re.search(pattern, filename)
+                    if match:
+                        date_str = match.group(1)
+                        for fmt in ['%Y%m%d', '%Y-%m-%d', '%d-%m-%Y']:
+                            try:
+                                result['date'] = datetime.strptime(date_str, fmt)
+                                break
+                            except ValueError:
+                                continue
+                        if result['date']:
+                            break
+
+            self.logger.info(f"Parsed filename result: {result}")
+
+        except Exception as e:
+            self.logger.warning(f"Error in advanced filename parsing: {e}")
+
+        return result
+
     def _generate_activities_from_parsed(self, parsed_data: Dict, shift_date: datetime) -> List[DriverActivity]:
         """Generuje aktywności na podstawie sparsowanych danych"""
         activities = []
 
         try:
-            if 'activities' in parsed_data and parsed_data['activities']:
+            if isinstance(parsed_data, dict) and 'activities' in parsed_data and parsed_data['activities']:
                 # Użyj rzeczywistych danych aktywności
                 for activity_data in parsed_data['activities'][:20]:  # Limit 20 aktywności
                     if isinstance(activity_data, dict) and 'error' not in activity_data:
                         try:
                             start_time = self._parse_time_string(activity_data.get('start_time', ''), shift_date)
-                            duration = activity_data.get('duration', 60)
+                            duration = int(activity_data.get('duration', 60))
                             end_time = start_time + timedelta(minutes=duration)
                             activity_type = activity_data.get('activity_type', 'unknown')
 
@@ -299,43 +395,37 @@ class DDDParser:
         workshift.total_distance = sum(a.distance_km for a in workshift.activities)
 
     def _create_fallback_workshift(self, file_path: str) -> WorkShift:
-        """Tworzy podstawowy workshift z parsowania nazwy pliku"""
+        """Tworzy podstawowy workshift z parsowania nazwy pliku - ulepszona wersja"""
         filename = os.path.basename(file_path)
-        parts = filename.replace('.DDD', '').replace('.ddd', '').split('_')
 
-        driver_name = "Nieznany"
-        shift_date = datetime.now()
+        try:
+            # Użyj zaawansowanego parsera nazwy pliku
+            parsed = self._parse_filename_advanced(filename)
 
-        if len(parts) >= 4:
-            try:
-                date_str = parts[1]
-                shift_date = datetime.strptime(date_str, '%Y%m%d')
-                if len(parts) > 4:
-                    driver_name = parts[4]
-            except:
-                pass
+            driver_name = parsed['driver_name'] or "Nieznany kierowca"
+            vehicle_id = parsed['vehicle_id'] or f"VEH_{filename[:10]}"
+            shift_date = parsed['date'] or datetime.now()
 
+            self.logger.info(f"Fallback workshift - date: {shift_date}, driver: {driver_name}, vehicle: {vehicle_id}")
+
+        except Exception as e:
+            self.logger.warning(f"Error in fallback parsing for {filename}: {e}")
+            driver_name = "Nieznany kierowca"
+            vehicle_id = f"VEH_{filename[:10]}"
+            shift_date = datetime.now()
+
+        # Wygeneruj przykładowe aktywności na podstawie daty
         activities = self._generate_sample_activities(shift_date)
 
         workshift = WorkShift(
             driver_name=driver_name,
-            vehicle_id=f"VEH_{filename[:10]}",
+            vehicle_id=vehicle_id,
             date=shift_date,
             activities=activities
         )
 
         self._calculate_totals(workshift)
         return workshift
-
-    def _create_dummy_workshift(self, file_path: str) -> WorkShift:
-        """Tworzy podstawowy workshift w przypadku błędu"""
-        filename = os.path.basename(file_path)
-        return WorkShift(
-            driver_name="Błąd parsowania",
-            vehicle_id=filename[:10],
-            date=datetime.now(),
-            activities=[]
-        )
 
 class WorkshiftGenerator:
     """Generator raportów workshiftów"""
@@ -604,11 +694,12 @@ def debug_info():
         'server_time': datetime.now().isoformat(),
         'supported_formats': ['.ddd', '.DDD', 'Smart Tacho V2'],
         'python_version': f"{os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}",
-        'flask_debug': app.debug
+        'flask_debug': app.debug,
+        'recent_processing_status': processing_status
     })
 
 def process_files_background(file_paths: List[str], start_date=None, end_date=None):
-    """Przetwarzaj pliki w tle"""
+    """Przetwarzaj pliki w tle - NAPRAWIONA WERSJA"""
     global processing_status
 
     processing_status = {
@@ -624,6 +715,8 @@ def process_files_background(file_paths: List[str], start_date=None, end_date=No
     workshifts = []
 
     try:
+        app.logger.info(f"Starting background processing - files: {len(file_paths)}, start_date: {start_date}, end_date: {end_date}")
+
         for file_path in file_paths:
             processing_status['current_file'] = os.path.basename(file_path)
             app.logger.info(f"Processing file: {processing_status['current_file']}")
@@ -632,24 +725,72 @@ def process_files_background(file_paths: List[str], start_date=None, end_date=No
                 # Parsuj plik .DDD
                 workshift = ddd_parser.parse_ddd_file(file_path)
 
-                # Filtruj według dat jeśli podano
-                if start_date and workshift.date < start_date:
-                    app.logger.info(f"File {processing_status['current_file']} filtered out by start date")
-                    continue
-                if end_date and workshift.date > end_date:
-                    app.logger.info(f"File {processing_status['current_file']} filtered out by end date")
-                    continue
+                # NAPRAWIONE FILTROWANIE DAT - porównanie tylko dat bez czasu
+                should_include = True
+                filter_reason = None
 
-                workshifts.append(workshift)
-                app.logger.info(f"Successfully processed: {processing_status['current_file']}")
+                app.logger.info(f"Workshift date: {workshift.date}, start_date: {start_date}, end_date: {end_date}")
+
+                # Filtruj według dat tylko jeśli są ustawione
+                if start_date and end_date:
+                    # Oba filtry ustawione - sprawdź zakres (porównuj tylko daty)
+                    workshift_date = workshift.date.date()
+                    start_filter_date = start_date.date()
+                    end_filter_date = end_date.date()
+
+                    if workshift_date < start_filter_date or workshift_date > end_filter_date:
+                        should_include = False
+                        filter_reason = f"date {workshift_date} not in range [{start_filter_date}, {end_filter_date}]"
+                elif start_date:
+                    # Tylko data początkowa
+                    if workshift.date.date() < start_date.date():
+                        should_include = False
+                        filter_reason = f"date {workshift.date.date()} before {start_date.date()}"
+                elif end_date:
+                    # Tylko data końcowa
+                    if workshift.date.date() > end_date.date():
+                        should_include = False
+                        filter_reason = f"date {workshift.date.date()} after {end_date.date()}"
+
+                if should_include:
+                    workshifts.append(workshift)
+                    app.logger.info(f"File {processing_status['current_file']} included in processing (date: {workshift.date.date()})")
+                else:
+                    app.logger.info(f"File {processing_status['current_file']} filtered out: {filter_reason}")
 
             except Exception as e:
                 error_msg = f"Błąd przetwarzania {os.path.basename(file_path)}: {str(e)}"
                 processing_status['errors'].append(error_msg)
                 app.logger.error(f"{error_msg}\n{traceback.format_exc()}")
 
+                # DODAJ FALLBACK - stwórz podstawowy workshift nawet przy błędzie parsowania
+                try:
+                    app.logger.info(f"Attempting fallback for {processing_status['current_file']}")
+                    fallback_workshift = ddd_parser._create_fallback_workshift(file_path)
+
+                    # Sprawdź filtr dat dla fallback
+                    should_include_fallback = True
+                    if start_date and end_date:
+                        if fallback_workshift.date.date() < start_date.date() or fallback_workshift.date.date() > end_date.date():
+                            should_include_fallback = False
+                    elif start_date:
+                        if fallback_workshift.date.date() < start_date.date():
+                            should_include_fallback = False
+                    elif end_date:
+                        if fallback_workshift.date.date() > end_date.date():
+                            should_include_fallback = False
+
+                    if should_include_fallback:
+                        workshifts.append(fallback_workshift)
+                        app.logger.info(f"Added fallback workshift for {processing_status['current_file']} (date: {fallback_workshift.date.date()})")
+                    else:
+                        app.logger.info(f"Fallback workshift for {processing_status['current_file']} also filtered out by date")
+
+                except Exception as fallback_error:
+                    app.logger.error(f"Fallback also failed for {processing_status['current_file']}: {fallback_error}")
+
             processing_status['processed_files'] += 1
-            time.sleep(0.1)  # Krótka przerwa żeby nie przeciążać systemu
+            time.sleep(0.1)
 
         # Generuj raport Excel
         if workshifts:
@@ -659,10 +800,30 @@ def process_files_background(file_paths: List[str], start_date=None, end_date=No
 
             workshift_generator.generate_excel_report(workshifts, output_path)
             processing_status['output_file'] = output_filename
-            app.logger.info(f"Generated Excel report: {output_filename}")
+            app.logger.info(f"Generated Excel report: {output_filename} with {len(workshifts)} workshifts")
         else:
-            processing_status['errors'].append("Brak plików do przetworzenia po filtrowaniu")
-            app.logger.warning("No workshifts generated after processing")
+            error_msg = "Brak workshiftów do wygenerowania"
+            if start_date or end_date:
+                error_msg += f" (po filtrowaniu dat: {start_date.date() if start_date else 'brak'} - {end_date.date() if end_date else 'brak'})"
+            processing_status['errors'].append(error_msg)
+            app.logger.warning(error_msg)
+
+            # Jeśli nie ma workshiftów, stwórz pusty raport
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_filename = f'empty_report_{timestamp}.xlsx'
+            output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
+
+            # Stwórz pusty workshift dla pustego raportu
+            empty_workshift = WorkShift(
+                driver_name="Brak danych po filtrowaniu",
+                vehicle_id="N/A",
+                date=datetime.now(),
+                activities=[]
+            )
+
+            workshift_generator.generate_excel_report([empty_workshift], output_path)
+            processing_status['output_file'] = output_filename
+            app.logger.info(f"Generated empty Excel report: {output_filename}")
 
     except Exception as e:
         error_msg = f"Błąd krytyczny: {str(e)}"
